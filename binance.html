@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="vi" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Pro Dashboard (Final)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; font-size: 0.85rem; background-color: #0d0d0d; color: #ccc; padding-bottom: 40px; }
+        
+        /* Table Styles */
+        .table-custom th { 
+            background-color: #1f1f1f; position: sticky; top: 0; z-index: 10; 
+            font-size: 0.8rem; text-align: right; border-bottom: 1px solid #444; 
+            cursor: pointer; user-select: none;
+        }
+        .table-custom th:hover { background-color: #333; color: #fff; }
+        .table-custom td { text-align: right; padding: 5px 8px; border-color: #2a2a2a; vertical-align: middle; }
+        .table-custom td:first-child, .table-custom th:first-child { text-align: left; }
+        .table-custom tbody tr { cursor: pointer; transition: background 0.1s; }
+        .table-custom tbody tr:hover { background-color: #333; }
+
+        /* Sort Icons */
+        th::after { content: ''; margin-left: 5px; opacity: 0.3; font-size: 0.7em; }
+        th.sort-desc::after { content: '▼'; opacity: 1; color: #f0b90b; }
+        th.sort-asc::after { content: '▲'; opacity: 1; color: #f0b90b; }
+
+        /* Standard Colors */
+        .text-up { color: #0ecb81 !important; }
+        .text-down { color: #f6465d !important; }
+        
+        /* --- VOLUME HEATMAP COLORS --- */
+        .vol-lvl-0 { color: #495057 !important; }                        
+        .vol-lvl-1 { color: #dee2e6 !important; }                        
+        .vol-lvl-2 { color: #fff3cd !important; font-weight: bold; }     
+        .vol-lvl-3 { color: #ffc107 !important; font-weight: bold; }     
+        .vol-lvl-4 { color: #fd7e14 !important; font-weight: 900; }      
+        .vol-lvl-5 { color: #dc3545 !important; font-weight: 900; text-shadow: 0 0 5px #dc3545; } 
+
+        /* Chart */
+        .chart-wrapper {
+            height: 75vh; overflow-y: auto; overflow-x: hidden;
+            border: 1px solid #333; background-color: #121212;
+        }
+        #marketChart { width: 100%; display: block; }
+
+        /* BOTTOM BAR */
+        #bottomBarContainer {
+            position: fixed; bottom: 0; left: 0; width: 100%; height: 40px; 
+            background-color: #000; border-top: 2px solid #333; z-index: 1000;
+        }
+        #trendCanvas { display: block; width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid p-2">
+    <div class="card bg-dark border-secondary mb-2">
+        <div class="card-body p-2">
+            <div class="row g-2 align-items-center">
+                <div class="col-auto">
+                    <label class="small d-block text-muted">Market Group</label>
+                    <select id="marketSelect" class="form-select-xs" style="max-width: 250px;">
+                        <option value="loading" disabled selected>Loading Futures & Spot...</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <label class="small d-block text-muted">Quick Sort</label>
+                    <select id="compareSelect" class="form-select-xs" style="width: 160px;">
+                        <option value="pump">Last price (Pump)</option>
+                        <option value="dump">Last price (Dump)</option>
+                        <option value="high24">24h Highest price</option>
+                        <option value="low24">24h Lowest price</option>
+                        <option value="bull">Bull run steps</option>
+                        <option value="bear">Bear run steps</option>
+                        <option value="vol">Volume Traded</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <label class="small d-block text-muted">Interval</label>
+                    <input type="number" id="intervalInput" class="form-control-xs" value="1000" style="width: 60px;">
+                </div>
+                <div class="col-auto">
+                    <label class="small d-block text-muted">Alert %</label>
+                    <input type="number" id="alertPercent" class="form-control-xs" value="1" step="0.1" style="width: 50px;">
+                </div>
+                <div class="col-auto">
+                    <label class="small d-block text-muted">Min Vol ($M)</label>
+                    <input type="number" id="minVolInput" class="form-control-xs" value="0" style="width: 50px;">
+                </div>
+                <div class="col-auto pt-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="chkAlert">
+                        <label class="form-check-label small" for="chkAlert">Sound</label>
+                    </div>
+                </div>
+                <div class="col-auto ms-auto pt-2">
+                    <button id="btnStart" class="btn btn-success btn-sm"><i class="fas fa-play"></i> Run</button>
+                    <button id="btnStop" class="btn btn-danger btn-sm" disabled><i class="fas fa-stop"></i> Stop</button>
+                </div>
+            </div>
+            <div class="row mt-1">
+                <div class="col text-end">
+                    <span id="status" class="badge bg-secondary">Wait for groups...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs" role="tablist">
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-price">Price List</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-chart">Chart Analysis</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-change">Change Range</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-funding">Funding Fee</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-signal">Signals</button></li>
+    </ul>
+
+    <div class="tab-content border border-top-0 border-secondary bg-dark">
+        <div class="tab-pane fade show active" id="tab-price">
+            <div class="table-responsive" style="height: 75vh;">
+                <table class="table table-dark table-hover table-custom table-sm mb-0" id="tablePrice">
+                    <thead>
+                        <tr>
+                            <th data-sort="s">Pair</th>
+                            <th data-sort="p">Price</th>
+                            <th data-sort="p24">24h %</th>
+                            <th data-sort="h">High</th>
+                            <th data-sort="l">Low</th>
+                            <th data-sort="v">Vol ($)</th>
+                            <th data-sort="vSnapPct">% Vol (Snap)</th> <th data-sort="snapChg" class="sort-desc">Change (Snap)%</th>
+                            <th data-sort="dHigh">Diff High%</th>
+                            <th data-sort="dLow">Diff Low%</th>
+                            <th data-sort="bb">Bull/Bear</th>
+                            <th data-sort="stepDiff">Alert Diff%</th>
+                        </tr>
+                    </thead>
+                    <tbody id="gridPrice"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-chart">
+            <div class="chart-wrapper">
+                <div style="position: relative; width: 99%;">
+                    <canvas id="marketChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-change">
+             <div class="table-responsive" style="height: 75vh;">
+                <table class="table table-dark table-hover table-custom table-sm" id="tableRange">
+                    <thead><tr><th data-sort="s">Pair</th><th data-sort="r" class="sort-desc">Range (%)</th><th data-sort="h">High</th><th data-sort="l">Low</th></tr></thead>
+                    <tbody id="gridRange"></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="tab-pane fade" id="tab-funding">
+             <div class="table-responsive" style="height: 75vh;">
+                <table class="table table-dark table-hover table-custom table-sm" id="tableFunding">
+                    <thead><tr><th data-sort="s">Pair</th><th data-sort="i">Index Price</th><th data-sort="r" class="sort-desc">Funding Rate</th><th data-sort="t">Next Funding</th></tr></thead>
+                    <tbody id="gridFunding"></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="tab-pane fade" id="tab-signal">
+            <div class="p-2">
+                <button class="btn btn-sm btn-outline-secondary mb-2" onclick="clearSignals()">Clear</button>
+                <div class="table-responsive" style="height: 70vh;">
+                    <table class="table table-dark table-hover table-custom table-sm" id="tableSignal">
+                        <thead><tr><th data-sort="time" class="sort-desc">Time</th><th data-sort="s">Pair</th><th data-sort="type">Type</th><th data-sort="diff">Diff %</th><th data-sort="p">Price</th></tr></thead>
+                        <tbody id="gridSignal"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="bottomBarContainer">
+    <canvas id="trendCanvas"></canvas>
+</div>
+
+<audio id="audioAlert" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"></audio>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    let isRunning = false;
+    let updateTimer = null;
+    let ws = null;
+    let chart = null;
+
+    let snapshotData = {};  
+    let prevTickData = {};  
+    let currentData = {};   
+    let bullBearCounters = {};
+    let fundingData = [];
+    let signalData = [];
+    let lastTrendValue = 0; 
+    
+    // Lưu trữ danh sách coin đã phân loại
+    let futuresGroups = {}; 
+    let spotGroups = {};
+
+    let sortState = {
+        price: { key: 'snapChg', dir: -1 },
+        range: { key: 'r', dir: -1 },
+        funding: { key: 'r', dir: -1 },
+        signal: { key: 'time', dir: -1 }
+    };
+
+    const dom = {
+        btnStart: document.getElementById('btnStart'),
+        btnStop: document.getElementById('btnStop'),
+        market: document.getElementById('marketSelect'),
+        compare: document.getElementById('compareSelect'),
+        interval: document.getElementById('intervalInput'),
+        alertPct: document.getElementById('alertPercent'),
+        minVol: document.getElementById('minVolInput'),
+        chkAlert: document.getElementById('chkAlert'),
+        status: document.getElementById('status'),
+        
+        gridPrice: document.getElementById('gridPrice'),
+        gridRange: document.getElementById('gridRange'),
+        gridFunding: document.getElementById('gridFunding'),
+        gridSignal: document.getElementById('gridSignal'),
+        chartCanvas: document.getElementById('marketChart'),
+        trendCanvas: document.getElementById('trendCanvas')
+    };
+
+    dom.btnStart.addEventListener('click', startApp);
+    dom.btnStop.addEventListener('click', stopApp);
+    dom.compare.addEventListener('change', applyPresetSort);
+
+    document.querySelectorAll('th[data-sort]').forEach(th => {
+        th.addEventListener('click', (e) => {
+            const tableId = th.closest('table').id;
+            const key = th.dataset.sort;
+            handleHeaderClick(tableId, key);
+        });
+    });
+
+    window.addEventListener('resize', () => { 
+        resizeTrendCanvas();
+        drawTrendBar(lastTrendValue); 
+    });
+
+    // --- MAIN INIT FUNCTION ---
+    async function initMarketGroups() {
+        // 1. Get FUTURES Info
+        try {
+            const resF = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+            const dataF = await resF.json();
+            
+            futuresGroups = {};
+            if(!futuresGroups['ALL']) futuresGroups['ALL'] = [];
+
+            dataF.symbols.forEach(s => {
+                if(s.status !== 'TRADING') return;
+                futuresGroups['ALL'].push(s.symbol);
+                
+                if (s.underlyingSubType && Array.isArray(s.underlyingSubType)) {
+                    s.underlyingSubType.forEach(type => {
+                        if(type) {
+                            if(!futuresGroups[type]) futuresGroups[type] = [];
+                            futuresGroups[type].push(s.symbol);
+                        }
+                    });
+                }
+            });
+        } catch(e) { console.error("Futures Init Error", e); }
+
+        // 2. Get SPOT Info (Standard API)
+        try {
+            // Sử dụng api.binance.com để ổn định hơn về CORS so với www.binance.com
+            const resS = await fetch('https://api.binance.com/api/v3/exchangeInfo');
+            const dataS = await resS.json();
+            
+            spotGroups = {};
+            if(!spotGroups['ALL']) spotGroups['ALL'] = [];
+            
+            dataS.symbols.forEach(s => {
+                if(s.status !== 'TRADING') return;
+                
+                spotGroups['ALL'].push(s.symbol);
+                
+                // Group by Quote Asset (USDT, BTC, ETH...)
+                const quote = s.quoteAsset;
+                if(!spotGroups[quote]) spotGroups[quote] = [];
+                spotGroups[quote].push(s.symbol);
+            });
+
+        } catch(e) { 
+            console.error("Spot Init Error", e); 
+        }
+
+        renderDropdown();
+    }
+
+    function renderDropdown() {
+        let html = '';
+
+        // --- RENDER FUTURES OPTGROUP ---
+        html += '<optgroup label="FUTURES (By SubType)">';
+        if(futuresGroups['ALL']) {
+            html += `<option value="ft_ALL">Futures ALL (${futuresGroups['ALL'].length})</option>`;
+            const fKeys = Object.keys(futuresGroups).filter(k => k !== 'ALL').sort();
+            fKeys.forEach(k => {
+                html += `<option value="ft_${k}">${k} (${futuresGroups[k].length})</option>`;
+            });
+        } else {
+            html += `<option disabled>Futures Unavailable</option>`;
+        }
+        html += '</optgroup>';
+
+        // --- RENDER SPOT OPTGROUP ---
+        html += '<optgroup label="SPOT (By QuoteAsset)">';
+        if(spotGroups['ALL']) {
+            html += `<option value="sp_ALL">Spot ALL (${spotGroups['ALL'].length})</option>`;
+            
+            // Prioritize common quotes
+            const priority = ['USDT', 'USDC', 'BTC', 'ETH', 'BNB', 'FDUSD', 'TRY', 'EUR'];
+            const sKeys = Object.keys(spotGroups).filter(k => k !== 'ALL');
+            
+            // Sort: Priority first, then alphabetical
+            sKeys.sort((a,b) => {
+                const idxA = priority.indexOf(a);
+                const idxB = priority.indexOf(b);
+                if(idxA !== -1 && idxB !== -1) return idxA - idxB;
+                if(idxA !== -1) return -1;
+                if(idxB !== -1) return 1;
+                return a.localeCompare(b);
+            });
+
+            sKeys.forEach(k => {
+                if(spotGroups[k].length > 0) {
+                    html += `<option value="sp_${k}">Spot ${k} (${spotGroups[k].length})</option>`;
+                }
+            });
+        } else {
+            html += `<option disabled>Spot Unavailable</option>`;
+        }
+        html += '</optgroup>';
+
+        dom.market.innerHTML = html;
+        dom.status.innerText = "Ready";
+    }
+
+    async function startApp() {
+        if(isRunning) return;
+        
+        const marketVal = dom.market.value; 
+        
+        if(!marketVal) return;
+
+        const isFutures = marketVal.startsWith('ft_');
+        const isSpot = marketVal.startsWith('sp_');
+
+        dom.btnStart.disabled = true;
+        dom.btnStop.disabled = false;
+        dom.market.disabled = true;
+        dom.status.className = 'badge bg-warning text-dark';
+        dom.status.innerText = 'Fetching Snapshot...';
+        
+        snapshotData = {};
+        prevTickData = {};
+        currentData = {};
+        bullBearCounters = {};
+        signalData = [];
+        fundingData = [];
+        dom.gridSignal.innerHTML = '';
+        lastTrendValue = 0;
+        
+        resizeTrendCanvas();
+        drawTrendBar(0);
+
+        const minVol = (parseFloat(dom.minVol.value) || 0) * 1000000;
+
+        // Determine API URL
+        let apiUrl = '';
+        if(isSpot) apiUrl = 'https://api.binance.com/api/v3/ticker/24hr';
+        else apiUrl = 'https://fapi.binance.com/fapi/v1/ticker/24hr';
+
+        // Determine Filter List
+        let allowedSymbols = null;
+        if(isFutures) {
+            const key = marketVal.replace('ft_', '');
+            allowedSymbols = futuresGroups[key];
+        } else if(isSpot) {
+            const key = marketVal.replace('sp_', '');
+            allowedSymbols = spotGroups[key];
+        }
+
+        try {
+            const res = await fetch(apiUrl);
+            const data = await res.json();
+            
+            data.forEach(item => {
+                const s = item.symbol;
+
+                // STRICT FILTER
+                if (allowedSymbols && !allowedSymbols.includes(s)) return;
+                
+                const qVol = parseFloat(item.quoteVolume);
+                if(qVol < minVol) return;
+
+                const price = parseFloat(item.lastPrice);
+                const obj = {
+                    s: s,
+                    p: price,
+                    p24: parseFloat(item.priceChangePercent),
+                    h: parseFloat(item.highPrice),
+                    l: parseFloat(item.lowPrice),
+                    v: qVol
+                };
+
+                snapshotData[s] = { ...obj };
+                currentData[s] = { ...obj };
+                prevTickData[s] = { ...obj };
+                bullBearCounters[s] = 0;
+            });
+
+            if(isFutures) loadFundingFee();
+            
+            // Connect socket
+            connectWS(isSpot ? 'spot' : 'futures');
+
+            const ms = parseInt(dom.interval.value) || 1000;
+            updateTimer = setInterval(onTick, ms);
+            
+            isRunning = true;
+            dom.status.className = 'badge bg-success';
+            dom.status.innerText = `Running: ${Object.keys(snapshotData).length} Pairs`;
+
+        } catch (e) {
+            console.error(e);
+            alert("Lỗi tải dữ liệu. Kiểm tra mạng hoặc CORS.");
+            stopApp();
+        }
+    }
+
+    function stopApp() {
+        isRunning = false;
+        if(ws) ws.close();
+        if(updateTimer) clearInterval(updateTimer);
+        
+        dom.btnStart.disabled = false;
+        dom.btnStop.disabled = true;
+        dom.market.disabled = false;
+        dom.status.className = 'badge bg-secondary';
+        dom.status.innerText = 'Stopped';
+    }
+
+    function connectWS(type) {
+        let url = 'wss://fstream.binance.com/ws/!ticker@arr';
+        if(type === 'spot') url = 'wss://stream.binance.com:9443/ws/!ticker@arr';
+        
+        ws = new WebSocket(url);
+        ws.onmessage = (evt) => {
+            const arr = JSON.parse(evt.data);
+            arr.forEach(t => {
+                const s = t.s;
+                if(currentData[s]) {
+                    currentData[s].p = parseFloat(t.c);
+                    currentData[s].p24 = parseFloat(t.P);
+                    currentData[s].h = parseFloat(t.h);
+                    currentData[s].l = parseFloat(t.l);
+                    currentData[s].v = parseFloat(t.q);
+                }
+            });
+        };
+    }
+
+    function onTick() {
+        if(!isRunning) return;
+
+        const alertThreshold = parseFloat(dom.alertPct.value) || 0.5;
+        const isSound = dom.chkAlert.checked;
+        
+        let displayList = [];
+        let rangeList = [];
+        let tongchenh = 0;
+
+        for(let s in currentData) {
+            const curr = currentData[s];
+            const snap = snapshotData[s];
+            const prev = prevTickData[s];
+
+            if (curr.p > prev.p) bullBearCounters[s]++;
+            else if (curr.p < prev.p) bullBearCounters[s]--;
+
+            let stepDiffPercent = 0;
+            if (prev.p > 0) stepDiffPercent = ((curr.p - prev.p) / prev.p) * 100;
+            
+            if (Math.abs(stepDiffPercent) >= alertThreshold) {
+                addSignal(s, stepDiffPercent, curr.p, isSound);
+            }
+
+            let changeSnap = 0;
+            if(snap.p > 0) changeSnap = ((curr.p - snap.p) / snap.p) * 100;
+            if(!isNaN(changeSnap)) tongchenh += changeSnap;
+
+            let diffHigh = ((curr.p - curr.h) / curr.h) * 100;
+            let diffLow = ((curr.p - curr.l) / curr.l) * 100;
+            let rangeVal = ((curr.h - curr.l) / curr.p) * 100;
+            
+            let volSinceRun = curr.v - snap.v;
+            let volSnapPct = (curr.v > 0) ? (volSinceRun / curr.v) * 100 : 0;
+            if (volSnapPct < 0) volSnapPct = 0;
+
+            displayList.push({
+                s: s,
+                p: curr.p,
+                p24: curr.p24,
+                h: curr.h,
+                l: curr.l,
+                v: curr.v,
+                snapChg: changeSnap,
+                dHigh: diffHigh,
+                dLow: diffLow,
+                bb: bullBearCounters[s],
+                stepDiff: stepDiffPercent,
+                vSnapPct: volSnapPct
+            });
+            
+            rangeList.push({ s: s, r: rangeVal, h: curr.h, l: curr.l });
+            prevTickData[s] = { ...curr }; 
+        }
+
+        sortAndRender(displayList, sortState.price, dom.gridPrice, renderPriceRow);
+        sortAndRender(rangeList, sortState.range, dom.gridRange, renderRangeRow);
+        renderChart(displayList);
+        
+        lastTrendValue = tongchenh;
+        drawTrendBar(tongchenh);
+    }
+
+    // --- BOTTOM BAR DRAWING ---
+    function resizeTrendCanvas() {
+        if (!dom.trendCanvas) return;
+        const container = dom.trendCanvas.parentElement;
+        if(container) {
+            dom.trendCanvas.width = container.clientWidth;
+            dom.trendCanvas.height = container.clientHeight;
+        }
+    }
+
+    function drawTrendBar(totalDiff) {
+        if (!dom.trendCanvas) return;
+        const ctx = dom.trendCanvas.getContext('2d');
+        const w = dom.trendCanvas.width;
+        const h = dom.trendCanvas.height;
+        const cx = w / 2;
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(cx, 0, 2, h);
+
+        const scale = w / 2000;
+        const m1 = 36 * scale + 30;
+        const m2 = 69 * scale + 60;
+
+        ctx.fillStyle = '#AFEEEE';
+        ctx.fillRect(cx + m1, 0, 2, h);
+        ctx.fillRect(cx + m2, 0, 2, h);
+        
+        ctx.fillStyle = '#FF0000';
+        ctx.fillRect(cx - m1, 0, 2, h);
+        ctx.fillRect(cx - m2, 0, 2, h);
+
+        const barLen = Math.abs(totalDiff) ; 
+        
+        if (totalDiff > 0) {
+            ctx.fillStyle = '#00FF00';
+            ctx.fillRect(cx + 2, 2, barLen, h - 4);
+        } else if (totalDiff < 0) {
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(cx - 2 - barLen, 2, barLen, h - 4);
+        }
+    }
+
+    // --- SORTING & RENDER ---
+    function handleHeaderClick(tableId, key) {
+        let type = '';
+        if(tableId === 'tablePrice') type = 'price';
+        else if(tableId === 'tableRange') type = 'range';
+        else if(tableId === 'tableFunding') type = 'funding';
+        else if(tableId === 'tableSignal') type = 'signal';
+        if(!type) return;
+
+        if (sortState[type].key === key) sortState[type].dir *= -1;
+        else { sortState[type].key = key; sortState[type].dir = -1; }
+        updateHeaderIcons(tableId, sortState[type]);
+        if(type === 'funding') sortAndRender(fundingData, sortState.funding, dom.gridFunding, renderFundingRow);
+        if(type === 'signal') sortAndRender(signalData, sortState.signal, dom.gridSignal, renderSignalRow);
+    }
+
+    function updateHeaderIcons(tableId, state) {
+        const table = document.getElementById(tableId);
+        table.querySelectorAll('th').forEach(th => {
+            th.classList.remove('sort-desc', 'sort-asc');
+            if(th.dataset.sort === state.key) {
+                th.classList.add(state.dir === -1 ? 'sort-desc' : 'sort-asc');
+            }
+        });
+    }
+
+    function applyPresetSort() {
+        const val = dom.compare.value;
+        const s = sortState.price;
+        if(val === 'pump') { s.key = 'snapChg'; s.dir = -1; }
+        else if(val === 'dump') { s.key = 'snapChg'; s.dir = 1; }
+        else if(val === 'high24') { s.key = 'dHigh'; s.dir = 1; }
+        else if(val === 'low24') { s.key = 'dLow'; s.dir = 1; }
+        else if(val === 'bull') { s.key = 'bb'; s.dir = -1; }
+        else if(val === 'bear') { s.key = 'bb'; s.dir = 1; }
+        else if(val === 'vol') { s.key = 'v'; s.dir = -1; }
+        updateHeaderIcons('tablePrice', s);
+    }
+
+    function sortAndRender(list, state, container, rowRenderer) {
+        list.sort((a, b) => {
+            let valA = a[state.key];
+            let valB = b[state.key];
+            if (typeof valA === 'string') return state.dir === -1 ? valB.localeCompare(valA) : valA.localeCompare(valB);
+            return (valA - valB) * (state.dir === -1 ? -1 : 1);
+        });
+        container.innerHTML = list.slice(0, 100).map(rowRenderer).join('');
+    }
+
+    function renderPriceRow(r) {
+        const clsSnap = r.snapChg >= 0 ? 'text-up' : 'text-down';
+        const clsBB = r.bb >= 0 ? 'text-up' : 'text-down';
+        let volClass = 'vol-lvl-0';
+        if (r.vSnapPct >= 20) volClass = 'vol-lvl-5';
+        else if (r.vSnapPct >= 10) volClass = 'vol-lvl-4';
+        else if (r.vSnapPct >= 5) volClass = 'vol-lvl-3';
+        else if (r.vSnapPct >= 2) volClass = 'vol-lvl-2';
+        else if (r.vSnapPct >= 1) volClass = 'vol-lvl-1';
+
+        return `<tr ondblclick="openTrade('${r.s}')">
+            <td class="fw-bold text-white">${r.s}</td>
+            <td>${fmtPrice(r.p)}</td>
+            <td class="${r.p24 >=0 ? 'text-up':'text-down'}">${r.p24.toFixed(2)}%</td>
+            <td>${fmtPrice(r.h)}</td>
+            <td>${fmtPrice(r.l)}</td>
+            <td>${fmtNum(r.v)}</td>
+            <td class="${volClass}">${r.vSnapPct.toFixed(2)}%</td>
+            <td class="${clsSnap} fw-bold">${r.snapChg.toFixed(2)}%</td>
+            <td class="text-muted">${r.dHigh.toFixed(2)}%</td>
+            <td class="text-muted">${r.dLow.toFixed(2)}%</td>
+            <td class="${clsBB}">${r.bb}</td>
+            <td>${r.stepDiff.toFixed(2)}%</td>
+        </tr>`;
+    }
+
+    function renderRangeRow(r) {
+        return `<tr ondblclick="openTrade('${r.s}')">
+            <td class="fw-bold">${r.s}</td>
+            <td class="text-highlight">${r.r.toFixed(2)}%</td>
+            <td>${fmtPrice(r.h)}</td>
+            <td>${fmtPrice(r.l)}</td>
+        </tr>`;
+    }
+
+    function renderFundingRow(r) {
+        const cls = r.r > 0 ? 'text-up' : 'text-down';
+        return `<tr ondblclick="openTrade('${r.s}')">
+            <td class="fw-bold">${r.s}</td>
+            <td>${r.i.toFixed(4)}</td>
+            <td class="${cls}">${r.r.toFixed(4)}%</td>
+            <td>${r.t}</td>
+        </tr>`;
+    }
+
+    function renderSignalRow(r) {
+        const cls = r.diff > 0 ? 'text-up' : 'text-down';
+        const type = r.diff > 0 ? 'PUMP' : 'DUMP';
+        return `<tr ondblclick="openTrade('${r.s}')">
+            <td>${new Date(r.time).toLocaleTimeString()}</td>
+            <td class="fw-bold">${r.s}</td>
+            <td class="${cls} fw-bold">${type}</td>
+            <td class="${cls}">${r.diff.toFixed(2)}%</td>
+            <td>${r.p}</td>
+        </tr>`;
+    }
+
+    async function loadFundingFee() {
+        try {
+            const res = await fetch('https://fapi.binance.com/fapi/v1/premiumIndex');
+            const data = await res.json();
+            fundingData = [];
+            data.forEach(item => {
+                if(snapshotData[item.symbol]) {
+                    fundingData.push({
+                        s: item.symbol,
+                        i: parseFloat(item.indexPrice),
+                        r: parseFloat(item.lastFundingRate) * 100,
+                        t: new Date(item.nextFundingTime).toLocaleTimeString()
+                    });
+                }
+            });
+            sortAndRender(fundingData, sortState.funding, dom.gridFunding, renderFundingRow);
+        } catch(e) {}
+    }
+
+    function openTrade(symbol) {
+        const marketVal = dom.market.value;
+        const isSpot = marketVal.startsWith('sp_');
+        let url = '';
+        if (!isSpot) {
+            url = `https://www.binance.com/vn/futures/${symbol}`;
+        } else {
+            let base = '', quote = '';
+            // Simple heuristics for base/quote splitting for URL
+            if (symbol.endsWith('USDT')) { base = symbol.replace('USDT',''); quote='USDT'; }
+            else if (symbol.endsWith('USDC')) { base = symbol.replace('USDC',''); quote='USDC'; }
+            else if (symbol.endsWith('BTC')) { base = symbol.replace('BTC',''); quote='BTC'; }
+            else if (symbol.endsWith('ETH')) { base = symbol.replace('ETH',''); quote='ETH'; }
+            else if (symbol.endsWith('BNB')) { base = symbol.replace('BNB',''); quote='BNB'; }
+            else if (symbol.endsWith('TRY')) { base = symbol.replace('TRY',''); quote='TRY'; }
+            else { base = symbol.slice(0, -3); quote = symbol.slice(-3); }
+            url = `https://www.binance.com/vn/trade/${base}_${quote}?layout=pro`;
+        }
+        window.open(url, '_blank');
+    }
+
+    function renderChart(list) {
+        let data = list.filter(r => r.snapChg !== 0);
+        data.sort((a,b) => b.snapChg - a.snapChg);
+        const rowHeight = 20; 
+        const totalHeight = Math.max(500, data.length * rowHeight);
+        dom.chartCanvas.parentNode.style.height = totalHeight + 'px';
+        dom.chartCanvas.height = totalHeight;
+
+        const labels = data.map(r => r.s);
+        const vals = data.map(r => r.snapChg);
+        const colors = vals.map(v => v >= 0 ? '#0ecb81' : '#f6465d');
+        
+        let max = 0;
+        vals.forEach(v => { if(Math.abs(v) > max) max = Math.abs(v); });
+        max = max * 1.05;
+
+        if(!chart) {
+            const ctx = dom.chartCanvas.getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{ data: vals, backgroundColor: colors, barThickness: 15 }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { min: -max, max: max, grid: { color: '#333' }, position: 'top' },
+                        y: { ticks: { color: '#ccc', font: {size: 11} }, grid: { display: false } }
+                    },
+                    plugins: { legend: { display: false } },
+                    onClick: (e) => {
+                        const pts = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true);
+                        if (pts.length) openTrade(chart.data.labels[pts[0].index]);
+                    }
+                }
+            });
+        } else {
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = vals;
+            chart.data.datasets[0].backgroundColor = colors;
+            chart.options.scales.x.min = -max;
+            chart.options.scales.x.max = max;
+            chart.resize();
+            chart.update();
+        }
+    }
+
+    let lastAlertTime = 0;
+    function addSignal(s, diff, price, sound) {
+        if(sound) {
+            const now = Date.now();
+            if (now - lastAlertTime > 1000) { 
+                document.getElementById('audioAlert').play().catch(()=>{});
+                lastAlertTime = now;
+            }
+        }
+        signalData.unshift({ time: Date.now(), s: s, diff: diff, p: price, type: diff > 0 ? 'PUMP' : 'DUMP' });
+        if(signalData.length > 100) signalData.pop();
+        sortAndRender(signalData, sortState.signal, dom.gridSignal, renderSignalRow);
+    }
+
+    function clearSignals() { signalData = []; dom.gridSignal.innerHTML = ''; }
+    function fmtPrice(p) { return p < 1 ? p.toFixed(5) : p.toFixed(2); }
+    function fmtNum(v) { 
+        if(v > 1000000) return (v/1000000).toFixed(2)+'M';
+        if(v > 1000) return (v/1000).toFixed(0)+'K';
+        return v.toFixed(0);
+    }
+
+    // Init Logic
+    resizeTrendCanvas();
+    drawTrendBar(0);
+    initMarketGroups(); 
+</script>
+</body>
+</html>
